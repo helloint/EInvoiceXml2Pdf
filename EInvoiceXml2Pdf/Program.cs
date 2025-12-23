@@ -6,31 +6,33 @@
  * iTextSharp.LGPLv2.Core 只能选用 <= 3.4.5
  * 高于这个版本的 PdfPTable 后面的元素会跟 PdfPTable 重叠
  ***********************************************************************/
-using System.Diagnostics;
 using System.Reflection;
 using System.Xml.Serialization;
 using EInvoiceXml2Pdf.Models;
 using iTextSharp.text;
 using iTextSharp.text.pdf;
 
-var inputFilePath = Path.Join(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "assets", "demo.xml");
+// 获取项目根目录（向上4级从 bin/Debug/net6.0 到项目根目录）
+var projectRoot = Path.GetFullPath(Path.Join(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", ".."));
+var assetsDirectory = Path.Join(projectRoot, "assets");
+var outputDirectory = Path.Join(projectRoot, "output");
 
-// 加载全电发票-XML
-var eInvoice = LoadEInvoice(inputFilePath);
+// 确保输出目录存在
+if (!Directory.Exists(outputDirectory))
+    Directory.CreateDirectory(outputDirectory);
 
-var outputDirectoryPath = Path.Join(AppDomain.CurrentDomain.BaseDirectory, "output");
-if (!Directory.Exists(outputDirectoryPath))
-    Directory.CreateDirectory(outputDirectoryPath);
+// 获取所有 XML 文件
+var xmlFiles = Directory.GetFiles(assetsDirectory, "*.xml", SearchOption.TopDirectoryOnly);
 
-Console.WriteLine("正在生成 PDF...");
+if (xmlFiles.Length == 0)
+{
+    Console.WriteLine($"在 {assetsDirectory} 目录下未找到任何 XML 文件。");
+    return;
+}
 
-var document = new Document(new Rectangle(610, 394), 13, 13, 10, 0);
+Console.WriteLine($"找到 {xmlFiles.Length} 个 XML 文件，开始批量转换...");
 
-var outputFilePath = Path.Join(outputDirectoryPath, Path.GetFileNameWithoutExtension(inputFilePath) + ".pdf");
-if (File.Exists(outputFilePath))
-    File.Delete(outputFilePath);
-
-// 字体资源
+// 字体资源路径
 var fontDirectoryPath = Path.Join(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Fonts");
 var fieldBaseFont = CreateFont(Path.Join(fontDirectoryPath, "simkai.ttf"));
 var contentBaseFont = CreateFont(Path.Join(fontDirectoryPath, "simsun.ttf"));
@@ -44,434 +46,466 @@ var fieldFont = new Font(fieldBaseFont, 9F, Font.NORMAL, fieldColor);
 var contentFont = new Font(contentBaseFont, 9F, Font.NORMAL, contentColor);
 var idNumFont = new Font(idNumBaseFont, 12F, Font.NORMAL, idNumColor);
 
-using var outputStream = File.OpenWrite(outputFilePath);
-var writer = PdfWriter.GetInstance(document, outputStream);
+int successCount = 0;
+int failCount = 0;
 
-document.Open();
-
-// 内容总宽度
-var contentWidth = document.PageSize.Width - document.LeftMargin - document.RightMargin;
-
-document
-#region 标题
-    .Add2(
-        new PdfPTable(new float[] { 210, contentWidth - 420 / 2, 210 })
-            .Set(x => x.TotalWidth, contentWidth)
-            .Set(x => x.LockedWidth, true)
-            .Set(x => x.SpacingAfter, 25)
-            .Set(x => x.SpacingBefore, 0)
-            .AddCell2(
-                new PdfPCell()
-                    .Set(x => x.BorderWidth, 0)
-            )
-            .AddCell2(() =>
-            {
-                // 标题下面的两条线
-                var cb = writer.DirectContent;
-                cb.SetLineWidth(0.6f);
-                cb.SetColorStroke(fieldColor);
-                cb.MoveTo(190, document.Top - 42f);
-                cb.LineTo(document.PageSize.Width - 200, document.Top - 42f);
-                cb.Stroke();
-
-                cb.MoveTo(190, document.Top - 45f);
-                cb.LineTo(document.PageSize.Width - 200, document.Top - 45f);
-                cb.Stroke();
-
-                return new PdfPCell(new Paragraph($"{eInvoice.Header.InherentLabel.EInvoiceType.LabelName}（{eInvoice.Header.InherentLabel.GeneralOrSpecialVAT.LabelName}）", titleFont)
-                    .Set(x => x.Alignment, Element.ALIGN_CENTER))
-                    .SetBorderWidth(0)
-                    .SetPadding(0, 10, 0, 0);
-            })
-            .AddCell2(
-                new PdfPCell()
-                    .AddElement2(
-                        new Paragraph()
-                            .Add2(new Chunk("发票号码：", fieldFont))
-                            .Add2(new Chunk(eInvoice.TaxSupervisionInfo.InvoiceNumber, contentFont))
-                    )
-                    .AddElement2(
-                        new Paragraph()
-                        .Add2(new Chunk("开票日期：", fieldFont))
-                        .Add2(new Chunk(eInvoice.TaxSupervisionInfo.IssueTime.ToString("yyyy年MM月dd日"), contentFont))
-                    )
-                    .SetPadding(0, 10, 0, 0)
-                    .SetBorderWidth(0)
-            )
-    )
-#endregion
-#region 购买方与销售方信息
-    .Add2(
-        new PdfPTable(new float[] { 34, contentWidth - 68 / 2, 34, contentWidth - 68 / 2 })
-            .Set(x => x.TotalWidth, contentWidth)
-            .Set(x => x.LockedWidth, true)
-            // 第一排
-            .AddCell2(
-                new PdfPCell(new Phrase("购买方信息", fieldFont))
-                    .Set(x => x.BorderColor, fieldColor)
-                    .Set(x => x.Rowspan, 2)
-                    .SetPadding(3, 6, 3, 6)
-            )
-            .AddCell2(
-                new PdfPCell(
-                    new Phrase()
-                        .Add2(
-                            new Chunk("名称：", fieldFont)
-                        )
-                        .Add2(
-                            new Chunk(eInvoice.EInvoiceData.BuyerInformation.BuyerName, contentFont)
-                        )
-                )
-                .Set(x => x.BorderColor, fieldColor)
-                .SetPadding(3, 10, 3, 10)
-                .SetBorderWidth(0, null, null, 0)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("销售方信息", fieldFont))
-                    .Set(x => x.BorderColor, fieldColor)
-                    .Set(x => x.Rowspan, 2)
-                    .SetPadding(3, 6, 3, 6)
-            )
-            .AddCell2(
-                new PdfPCell(
-                    new Phrase()
-                        .Add2(
-                            new Chunk("名称：", fieldFont)
-                        )
-                        .Add2(
-                            new Chunk(eInvoice.EInvoiceData.SellerInformation.SellerName, contentFont)
-                        )
-                )
-                .Set(x => x.BorderColor, fieldColor)
-                .SetPadding(3, 10, 3, 0)
-                .SetBorderWidth(0, null, null, 0)
-            )
-            // 第二排
-            .AddCell2(
-                new PdfPCell(
-                    new Phrase()
-                        .Add2(
-                            new Chunk("统一社会信用代码/纳税人识别号：", fieldFont)
-                        )
-                        .Add2(
-                            new Chunk(eInvoice.EInvoiceData.BuyerInformation.BuyerIdNum, idNumFont)
-                                .SetHorizontalScaling(0.9F)
-                        )
-                )
-                .Set(x => x.BorderColor, fieldColor)
-                .SetBorderWidth(0, 0, null, null)
-                .SetPadding(3, 5, 3, 0)
-            )
-            .AddCell2(
-                new PdfPCell(
-                    new Phrase()
-                        .Add2(
-                            new Chunk("统一社会信用代码/纳税人识别号：", fieldFont)
-                        )
-                        .Add2(
-                            new Chunk(eInvoice.EInvoiceData.SellerInformation.SellerIdNum, idNumFont)
-                                .SetHorizontalScaling(0.9F)
-                        )
-                )
-                .Set(x => x.BorderColor, fieldColor)
-                .SetPadding(3, 5, 3, 0)
-                .SetBorderWidth(0, 0, null, null)
-            )
-    )
-#endregion
-#region 明细
-    .Add2(() =>
+// 批量处理每个 XML 文件
+foreach (var xmlFilePath in xmlFiles)
+{
+    try
     {
-        var table = new PdfPTable(new float[] { 170, 114, 62, 120, 120, 120, 106, 126 })
-            .Set(x => x.TotalWidth, contentWidth)
-            .Set(x => x.LockedWidth, true);
+        var fileName = Path.GetFileNameWithoutExtension(xmlFilePath);
+        var outputFilePath = Path.Join(outputDirectory, $"{fileName}.pdf");
+        
+        Console.WriteLine($"正在处理: {Path.GetFileName(xmlFilePath)}...");
+        
+        // 加载全电发票-XML
+        var eInvoice = LoadEInvoice(xmlFilePath);
+        
+        // 生成 PDF
+        GeneratePdf(eInvoice, outputFilePath, titleFont, fieldFont, contentFont, idNumFont, fieldColor);
+        
+        Console.WriteLine($"  ✓ 已生成: {Path.GetFileName(outputFilePath)}");
+        successCount++;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"  ✗ 处理失败: {Path.GetFileName(xmlFilePath)} - {ex.Message}");
+        failCount++;
+    }
+}
 
-        // 表头
-        table
-            .AddCell2(
-                new PdfPCell(new Phrase("项目名称", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                     .SetBorderWidth(null, 0, 0, null)
-                     .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("规格型号", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                     .SetBorderWidth(0, 0, 0, null)
-                     .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("单 位", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                     .SetBorderWidth(0, 0, 0, null)
-                     .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("数 量", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                     .SetBorderWidth(0, 0, 0, null)
-                     .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("单 价", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
-                     .SetBorderWidth(0, 0, 0, null)
-                     .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("金 额", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
-                     .SetBorderWidth(0, 0, 0, null)
-                     .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("税率/征收率", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.BorderWidthTop, 0)
-                     .Set(x => x.BorderWidthRight, 0)
-                     .Set(x => x.BorderWidthLeft, 0)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                     .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("税 额", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.BorderWidthTop, 0)
-                     .Set(x => x.BorderWidthLeft, 0)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
-                     .SetPadding(5, 4, 5, 6)
-            );
+Console.WriteLine($"\n转换完成！成功: {successCount} 个，失败: {failCount} 个");
 
-        // 内容
-        foreach (var item in eInvoice.EInvoiceData.IssuItemInformation)
-        {
-            table
-                //项目名称
-                .AddCell2(
-                    new PdfPCell(new Phrase(item.ItemName, contentFont))
-                        .Set(x => x.BorderColor, fieldColor)
-                        .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                        .SetBorderWidth(null, 0, 0, 0)
-                        .SetPadding(0)
-                )
-                //规格型号
-                .AddCell2(
-                    new PdfPCell(new Phrase(item.SpecMod, contentFont))
-                        .Set(x => x.BorderColor, fieldColor)
-                        .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                        .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                        .SetBorderWidth(0)
-                        .SetPadding(0)
-                )
-                //单位
-                .AddCell2(
-                    new PdfPCell(new Phrase(item.MeaUnits, contentFont))
-                        .Set(x => x.BorderColor, fieldColor)
-                        .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                        .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                        .SetBorderWidth(0)
-                        .SetPadding(0)
-                )
-                //数量
-                .AddCell2(
-                    new PdfPCell(new Phrase(item.Quantity, contentFont))
-                        .Set(x => x.BorderColor, fieldColor)
-                        .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                        .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                        .SetBorderWidth(0)
-                        .SetPadding(0)
-                )
-                //单价
-                .AddCell2(
-                    new PdfPCell(new Phrase(item.UnPrice, contentFont))
-                        .Set(x => x.BorderColor, fieldColor)
-                        .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                        .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
-                        .SetBorderWidth(0)
-                        .SetPadding(0)
-                )
-                //金额
-                .AddCell2(
-                    new PdfPCell(new Phrase(item.Amount, contentFont))
-                        .Set(x => x.BorderColor, fieldColor)
-                        .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                        .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
-                        .SetBorderWidth(0)
-                        .SetPadding(0)
-                )
-                //税率/征收率
-                .AddCell2(
-                    new PdfPCell(new Phrase(FormatTaxRate(item.TaxRate), contentFont))
-                        .Set(x => x.BorderColor, fieldColor)
-                        .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                        .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                        .SetBorderWidth(0)
-                        .SetPadding(0)
-                )
-                //税额
-                .AddCell2(
-                    new PdfPCell(new Phrase(item.ComTaxAm, contentFont))
-                        .Set(x => x.BorderColor, fieldColor)
-                        .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                        .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
-                        .SetBorderWidth(0, 0, null, 0)
-                        .SetPadding(0)
-                )
-                ;
-        }
+static void GeneratePdf(EInvoice eInvoice, string outputFilePath, Font titleFont, Font fieldFont, Font contentFont, Font idNumFont, BaseColor fieldColor)
+{
+    var document = new Document(new Rectangle(610, 394), 13, 13, 10, 0);
+    
+    if (File.Exists(outputFilePath))
+        File.Delete(outputFilePath);
 
-        // 占位
-        table.AddCell2(
-            new PdfPCell()
-                .Set(x => x.BorderColor, fieldColor)
-                .Set(x => x.BorderWidthTop, 0)
-                .Set(x => x.BorderWidthBottom, 0)
-                .Set(x => x.Colspan, 8)
-                .Set(x => x.FixedHeight, 110 - table.TotalHeight)
-                .SetPadding(0)
-        );
+    using var outputStream = File.OpenWrite(outputFilePath);
+    var writer = PdfWriter.GetInstance(document, outputStream);
 
-        return table;
-    })
-#endregion
-#region 合计
-    .Add2(
-        new PdfPTable(new float[] { 247, 460, 240 })
-            .Set(x => x.TotalWidth, contentWidth)
-            .Set(x => x.LockedWidth, true)
-            .AddCell2(
-                new PdfPCell(new Phrase("合\u3000\u3000\u3000\u3000计", fieldFont))
+    document.Open();
+
+    // 内容总宽度
+    var contentWidth = document.PageSize.Width - document.LeftMargin - document.RightMargin;
+
+    document
+    #region 标题
+        .Add2(
+            new PdfPTable(new float[] { 210, contentWidth - 420 / 2, 210 })
+                .Set(x => x.TotalWidth, contentWidth)
+                .Set(x => x.LockedWidth, true)
+                .Set(x => x.SpacingAfter, 25)
+                .Set(x => x.SpacingBefore, 0)
+                .AddCell2(
+                    new PdfPCell()
+                        .Set(x => x.BorderWidth, 0)
+                )
+                .AddCell2(() =>
+                {
+                    // 标题下面的两条线
+                    var cb = writer.DirectContent;
+                    cb.SetLineWidth(0.6f);
+                    cb.SetColorStroke(fieldColor);
+                    cb.MoveTo(190, document.Top - 42f);
+                    cb.LineTo(document.PageSize.Width - 200, document.Top - 42f);
+                    cb.Stroke();
+
+                    cb.MoveTo(190, document.Top - 45f);
+                    cb.LineTo(document.PageSize.Width - 200, document.Top - 45f);
+                    cb.Stroke();
+
+                    return new PdfPCell(new Paragraph($"{eInvoice.Header.InherentLabel.EInvoiceType.LabelName}（{eInvoice.Header.InherentLabel.GeneralOrSpecialVAT.LabelName}）", titleFont)
+                        .Set(x => x.Alignment, Element.ALIGN_CENTER))
+                        .SetBorderWidth(0)
+                        .SetPadding(0, 10, 0, 0);
+                })
+                .AddCell2(
+                    new PdfPCell()
+                        .AddElement2(
+                            new Paragraph()
+                                .Add2(new Chunk("发票号码：", fieldFont))
+                                .Add2(new Chunk(eInvoice.TaxSupervisionInfo.InvoiceNumber, contentFont))
+                        )
+                        .AddElement2(
+                            new Paragraph()
+                            .Add2(new Chunk("开票日期：", fieldFont))
+                            .Add2(new Chunk(eInvoice.TaxSupervisionInfo.IssueTime.ToString("yyyy年MM月dd日"), contentFont))
+                        )
+                        .SetPadding(0, 10, 0, 0)
+                        .SetBorderWidth(0)
+                )
+        )
+    #endregion
+    #region 购买方与销售方信息
+        .Add2(
+            new PdfPTable(new float[] { 34, contentWidth - 68 / 2, 34, contentWidth - 68 / 2 })
+                .Set(x => x.TotalWidth, contentWidth)
+                .Set(x => x.LockedWidth, true)
+                // 第一排
+                .AddCell2(
+                    new PdfPCell(new Phrase("购买方信息", fieldFont))
+                        .Set(x => x.BorderColor, fieldColor)
+                        .Set(x => x.Rowspan, 2)
+                        .SetPadding(3, 6, 3, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(
+                        new Phrase()
+                            .Add2(
+                                new Chunk("名称：", fieldFont)
+                            )
+                            .Add2(
+                                new Chunk(eInvoice.EInvoiceData.BuyerInformation.BuyerName, contentFont)
+                            )
+                    )
                     .Set(x => x.BorderColor, fieldColor)
-                    .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                    .SetBorderWidth(null, 0, 0, null)
-                    .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("¥" + eInvoice.EInvoiceData.BasicInformation.TotalAmWithoutTax, contentFont))
+                    .SetPadding(3, 10, 3, 10)
+                    .SetBorderWidth(0, null, null, 0)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("销售方信息", fieldFont))
+                        .Set(x => x.BorderColor, fieldColor)
+                        .Set(x => x.Rowspan, 2)
+                        .SetPadding(3, 6, 3, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(
+                        new Phrase()
+                            .Add2(
+                                new Chunk("名称：", fieldFont)
+                            )
+                            .Add2(
+                                new Chunk(eInvoice.EInvoiceData.SellerInformation.SellerName, contentFont)
+                            )
+                    )
                     .Set(x => x.BorderColor, fieldColor)
-                    .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
-                    .SetBorderWidth(0, 0, 0, null)
-                    .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase("¥" + eInvoice.EInvoiceData.BasicInformation.TotalTaxAm, contentFont))
+                    .SetPadding(3, 10, 3, 0)
+                    .SetBorderWidth(0, null, null, 0)
+                )
+                // 第二排
+                .AddCell2(
+                    new PdfPCell(
+                        new Phrase()
+                            .Add2(
+                                new Chunk("统一社会信用代码/纳税人识别号：", fieldFont)
+                            )
+                            .Add2(
+                                new Chunk(eInvoice.EInvoiceData.BuyerInformation.BuyerIdNum, idNumFont)
+                                    .SetHorizontalScaling(0.9F)
+                            )
+                    )
                     .Set(x => x.BorderColor, fieldColor)
-                    .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
                     .SetBorderWidth(0, 0, null, null)
-                    .SetPadding(5, 4, 5, 6)
-            )
-    )
-#endregion
-#region 价税合计
-    .Add2(
-        new PdfPTable(new float[] { 247, 414, 287 })
-            .Set(x => x.TotalWidth, contentWidth)
-            .Set(x => x.LockedWidth, true)
-            .AddCell2(
-                new PdfPCell(new Phrase("价税合计（大写）", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.BorderWidthTop, 0)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                     .Set(x => x.VerticalAlignment, Element.ALIGN_MIDDLE)
-                     .SetPadding(5, 4, 5, 6)
-            )
-            .AddCell2(
-                new PdfPCell(
-                     new Phrase()
-                        .Add2(() =>
-                        {
-                            var totalImage = LoadTotalImage();
-                            var image = Image.GetInstance(totalImage);
-                            image.ScaleAbsolute(14, 14);
-
-                            return new Chunk(image, 0, 0);
-                        })
-                        .Add2(
-                            new Chunk(eInvoice.EInvoiceData.BasicInformation.TotalTaxincludedAmountInChinese, contentFont)
-                                .SetTextRise(4f)
-                         )
+                    .SetPadding(3, 5, 3, 0)
+                )
+                .AddCell2(
+                    new PdfPCell(
+                        new Phrase()
+                            .Add2(
+                                new Chunk("统一社会信用代码/纳税人识别号：", fieldFont)
+                            )
+                            .Add2(
+                                new Chunk(eInvoice.EInvoiceData.SellerInformation.SellerIdNum, idNumFont)
+                                    .SetHorizontalScaling(0.9F)
+                            )
                     )
                     .Set(x => x.BorderColor, fieldColor)
-                    .SetBorderWidth(0, 0, 0, null)
-                    .Set(x => x.VerticalAlignment, Element.ALIGN_MIDDLE)
-                    .SetPadding(5)
-            )
-            .AddCell2(
-                new PdfPCell(
-                    new Phrase()
-                        .Add2(
-                            new Chunk("（小写）", fieldFont)
-                                .SetTextRise(1.2f)
-                        )
-                        .Add2(
-                            new Chunk("¥" + eInvoice.EInvoiceData.BasicInformation.TotalTaxincludedAmount, contentFont)
-                                .SetTextRise(1.2f)
-                        )
+                    .SetPadding(3, 5, 3, 0)
+                    .SetBorderWidth(0, 0, null, null)
+                )
+        )
+    #endregion
+    #region 明细
+        .Add2(() =>
+        {
+            var table = new PdfPTable(new float[] { 170, 114, 62, 120, 120, 120, 106, 126 })
+                .Set(x => x.TotalWidth, contentWidth)
+                .Set(x => x.LockedWidth, true);
+
+            // 表头
+            table
+                .AddCell2(
+                    new PdfPCell(new Phrase("项目名称", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                         .SetBorderWidth(null, 0, 0, null)
+                         .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("规格型号", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                         .SetBorderWidth(0, 0, 0, null)
+                         .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("单 位", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                         .SetBorderWidth(0, 0, 0, null)
+                         .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("数 量", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                         .SetBorderWidth(0, 0, 0, null)
+                         .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("单 价", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
+                         .SetBorderWidth(0, 0, 0, null)
+                         .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("金 额", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
+                         .SetBorderWidth(0, 0, 0, null)
+                         .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("税率/征收率", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.BorderWidthTop, 0)
+                         .Set(x => x.BorderWidthRight, 0)
+                         .Set(x => x.BorderWidthLeft, 0)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                         .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("税 额", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.BorderWidthTop, 0)
+                         .Set(x => x.BorderWidthLeft, 0)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
+                         .SetPadding(5, 4, 5, 6)
+                );
+
+            // 内容
+            foreach (var item in eInvoice.EInvoiceData.IssuItemInformation)
+            {
+                table
+                    //项目名称
+                    .AddCell2(
+                        new PdfPCell(new Phrase(item.ItemName, contentFont))
+                            .Set(x => x.BorderColor, fieldColor)
+                            .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                            .SetBorderWidth(null, 0, 0, 0)
+                            .SetPadding(0)
                     )
+                    //规格型号
+                    .AddCell2(
+                        new PdfPCell(new Phrase(item.SpecMod, contentFont))
+                            .Set(x => x.BorderColor, fieldColor)
+                            .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                            .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                            .SetBorderWidth(0)
+                            .SetPadding(0)
+                    )
+                    //单位
+                    .AddCell2(
+                        new PdfPCell(new Phrase(item.MeaUnits, contentFont))
+                            .Set(x => x.BorderColor, fieldColor)
+                            .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                            .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                            .SetBorderWidth(0)
+                            .SetPadding(0)
+                    )
+                    //数量
+                    .AddCell2(
+                        new PdfPCell(new Phrase(item.Quantity, contentFont))
+                            .Set(x => x.BorderColor, fieldColor)
+                            .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                            .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                            .SetBorderWidth(0)
+                            .SetPadding(0)
+                    )
+                    //单价
+                    .AddCell2(
+                        new PdfPCell(new Phrase(item.UnPrice, contentFont))
+                            .Set(x => x.BorderColor, fieldColor)
+                            .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                            .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
+                            .SetBorderWidth(0)
+                            .SetPadding(0)
+                    )
+                    //金额
+                    .AddCell2(
+                        new PdfPCell(new Phrase(item.Amount, contentFont))
+                            .Set(x => x.BorderColor, fieldColor)
+                            .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                            .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
+                            .SetBorderWidth(0)
+                            .SetPadding(0)
+                    )
+                    //税率/征收率
+                    .AddCell2(
+                        new PdfPCell(new Phrase(FormatTaxRate(item.TaxRate), contentFont))
+                            .Set(x => x.BorderColor, fieldColor)
+                            .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                            .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                            .SetBorderWidth(0)
+                            .SetPadding(0)
+                    )
+                    //税额
+                    .AddCell2(
+                        new PdfPCell(new Phrase(item.ComTaxAm, contentFont))
+                            .Set(x => x.BorderColor, fieldColor)
+                            .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                            .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
+                            .SetBorderWidth(0, 0, null, 0)
+                            .SetPadding(0)
+                    )
+                    ;
+            }
+
+            // 占位
+            table.AddCell2(
+                new PdfPCell()
                     .Set(x => x.BorderColor, fieldColor)
                     .Set(x => x.BorderWidthTop, 0)
-                    .Set(x => x.BorderWidthLeft, 0)
-                    .Set(x => x.VerticalAlignment, Element.ALIGN_MIDDLE)
-                    .SetPadding(5, 4, 5, 6)
-            )
-    )
-#endregion
-#region 备注
-    .Add2(
-        new PdfPTable(new float[] { 18, contentWidth - 18 })
-            .Set(x => x.TotalWidth, contentWidth)
-            .Set(x => x.LockedWidth, true)
-            .AddCell2(
-                new PdfPCell(new Phrase("备\r\n\r\n注", fieldFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.BorderWidthTop, 0)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
-                     .Set(x => x.VerticalAlignment, Element.ALIGN_MIDDLE)
-                     .Set(x => x.FixedHeight, 56)
-                     .SetPadding(3, 6, 3, 6)
-            )
-            .AddCell2(
-                new PdfPCell(new Phrase(eInvoice.EInvoiceData.AdditionalInformation.Remark, contentFont))
-                     .Set(x => x.BorderColor, fieldColor)
-                     .Set(x => x.BorderWidthTop, 0)
-                     .Set(x => x.BorderWidthLeft, 0)
-                     .Set(x => x.HorizontalAlignment, Element.ALIGN_LEFT)
-                     .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
-                     .Set(x => x.FixedHeight, 56)
-                     .SetPadding(0)
-            )
-    )
-#endregion
-#region 开票人
-    .Add2(
-        new Paragraph()
-            .Set(x => x.SpacingBefore, 12)
-            .Set(x => x.FirstLineIndent, 45)
-            .Add2(
-                new Chunk("开票人：", fieldFont)
-            )
-            .Add2(
-                new Chunk(eInvoice.EInvoiceData.BasicInformation.Drawer, contentFont)
-            )
-    )
-#endregion
-    ;
+                    .Set(x => x.BorderWidthBottom, 0)
+                    .Set(x => x.Colspan, 8)
+                    .Set(x => x.FixedHeight, 110 - table.TotalHeight)
+                    .SetPadding(0)
+            );
 
-document.Close();
-writer.Close();
+            return table;
+        })
+    #endregion
+    #region 合计
+        .Add2(
+            new PdfPTable(new float[] { 247, 460, 240 })
+                .Set(x => x.TotalWidth, contentWidth)
+                .Set(x => x.LockedWidth, true)
+                .AddCell2(
+                    new PdfPCell(new Phrase("合\u3000\u3000\u3000\u3000计", fieldFont))
+                        .Set(x => x.BorderColor, fieldColor)
+                        .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                        .SetBorderWidth(null, 0, 0, null)
+                        .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("¥" + eInvoice.EInvoiceData.BasicInformation.TotalAmWithoutTax, contentFont))
+                        .Set(x => x.BorderColor, fieldColor)
+                        .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
+                        .SetBorderWidth(0, 0, 0, null)
+                        .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase("¥" + eInvoice.EInvoiceData.BasicInformation.TotalTaxAm, contentFont))
+                        .Set(x => x.BorderColor, fieldColor)
+                        .Set(x => x.HorizontalAlignment, Element.ALIGN_RIGHT)
+                        .SetBorderWidth(0, 0, null, null)
+                        .SetPadding(5, 4, 5, 6)
+                )
+        )
+    #endregion
+    #region 价税合计
+        .Add2(
+            new PdfPTable(new float[] { 247, 414, 287 })
+                .Set(x => x.TotalWidth, contentWidth)
+                .Set(x => x.LockedWidth, true)
+                .AddCell2(
+                    new PdfPCell(new Phrase("价税合计（大写）", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.BorderWidthTop, 0)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                         .Set(x => x.VerticalAlignment, Element.ALIGN_MIDDLE)
+                         .SetPadding(5, 4, 5, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(
+                         new Phrase()
+                            .Add2(() =>
+                            {
+                                var totalImage = LoadTotalImage();
+                                var image = Image.GetInstance(totalImage);
+                                image.ScaleAbsolute(14, 14);
 
-Console.WriteLine($"正在打开 PDF: {outputFilePath}...");
-Process.Start(new ProcessStartInfo
-{
-    FileName = outputFilePath,
-    UseShellExecute = true,
-});
+                                return new Chunk(image, 0, 0);
+                            })
+                            .Add2(
+                                new Chunk(eInvoice.EInvoiceData.BasicInformation.TotalTaxincludedAmountInChinese, contentFont)
+                                    .SetTextRise(4f)
+                             )
+                        )
+                        .Set(x => x.BorderColor, fieldColor)
+                        .SetBorderWidth(0, 0, 0, null)
+                        .Set(x => x.VerticalAlignment, Element.ALIGN_MIDDLE)
+                        .SetPadding(5)
+                )
+                .AddCell2(
+                    new PdfPCell(
+                        new Phrase()
+                            .Add2(
+                                new Chunk("（小写）", fieldFont)
+                                    .SetTextRise(1.2f)
+                            )
+                            .Add2(
+                                new Chunk("¥" + eInvoice.EInvoiceData.BasicInformation.TotalTaxincludedAmount, contentFont)
+                                    .SetTextRise(1.2f)
+                            )
+                        )
+                        .Set(x => x.BorderColor, fieldColor)
+                        .Set(x => x.BorderWidthTop, 0)
+                        .Set(x => x.BorderWidthLeft, 0)
+                        .Set(x => x.VerticalAlignment, Element.ALIGN_MIDDLE)
+                        .SetPadding(5, 4, 5, 6)
+                )
+        )
+    #endregion
+    #region 备注
+        .Add2(
+            new PdfPTable(new float[] { 18, contentWidth - 18 })
+                .Set(x => x.TotalWidth, contentWidth)
+                .Set(x => x.LockedWidth, true)
+                .AddCell2(
+                    new PdfPCell(new Phrase("备\r\n\r\n注", fieldFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.BorderWidthTop, 0)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_CENTER)
+                         .Set(x => x.VerticalAlignment, Element.ALIGN_MIDDLE)
+                         .Set(x => x.FixedHeight, 56)
+                         .SetPadding(3, 6, 3, 6)
+                )
+                .AddCell2(
+                    new PdfPCell(new Phrase(eInvoice.EInvoiceData.AdditionalInformation.Remark, contentFont))
+                         .Set(x => x.BorderColor, fieldColor)
+                         .Set(x => x.BorderWidthTop, 0)
+                         .Set(x => x.BorderWidthLeft, 0)
+                         .Set(x => x.HorizontalAlignment, Element.ALIGN_LEFT)
+                         .Set(x => x.VerticalAlignment, Element.ALIGN_TOP)
+                         .Set(x => x.FixedHeight, 56)
+                         .SetPadding(0)
+                )
+        )
+    #endregion
+    #region 开票人
+        .Add2(
+            new Paragraph()
+                .Set(x => x.SpacingBefore, 12)
+                .Set(x => x.FirstLineIndent, 45)
+                .Add2(
+                    new Chunk("开票人：", fieldFont)
+                )
+                .Add2(
+                    new Chunk(eInvoice.EInvoiceData.BasicInformation.Drawer, contentFont)
+                )
+        )
+    #endregion
+        ;
+
+    document.Close();
+    writer.Close();
+}
 
 static byte[] LoadTotalImage()
 {
